@@ -1,0 +1,1366 @@
+local Players = game:GetService("Players")
+
+local UIS = game:GetService("UserInputService")
+
+local GS = game:GetService("GuiService")
+
+local PG = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local env = _G
+
+if type(getgenv) == "function" then
+
+    env = getgenv()
+
+end
+
+for _, name in ipairs({"__FishingAutoClick", "__AutoFishPanel"}) do
+
+    local old = env[name]
+
+    if old and old.stop then
+
+        old.stop()
+
+    end
+
+end
+
+local S = {
+
+    alive = true,
+
+    unlocked = false,
+
+    fish = false,
+
+    gift = false,
+
+    held = nil,
+
+    openedGift = false
+
+}
+
+env.__AutoFishPanel = S
+
+local connections = {}
+
+local function connect(signal, callback)
+
+    local connection = signal:Connect(callback)
+
+    table.insert(connections, connection)
+
+    return connection
+
+end
+
+local function make(class, properties, parent)
+
+    local object = Instance.new(class)
+
+    for name, value in pairs(properties) do
+
+        object[name] = value
+
+    end
+
+    object.Parent = parent
+
+    return object
+
+end
+
+local function round(object, radius)
+
+    make("UICorner", {
+
+        CornerRadius = UDim.new(0, radius)
+
+    }, object)
+
+end
+
+local C = {
+
+    bg = Color3.fromRGB(12, 12, 14),
+
+    field = Color3.fromRGB(27, 27, 30),
+
+    green = Color3.fromRGB(245, 245, 245),
+
+    text = Color3.fromRGB(245, 245, 245),
+
+    muted = Color3.fromRGB(150, 150, 158),
+
+    error = Color3.fromRGB(210, 210, 215)
+
+}
+
+local gui = make("ScreenGui", {
+
+    Name = "AutoFishPanel",
+
+    ResetOnSpawn = false,
+
+    IgnoreGuiInset = true,
+
+    DisplayOrder = 100,
+
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+}, PG)
+
+local panel = make("Frame", {
+
+    Position = UDim2.fromOffset(24, 120),
+
+    Size = UDim2.fromOffset(310, 390),
+
+    BackgroundColor3 = C.bg,
+
+    BorderSizePixel = 0
+
+}, gui)
+
+round(panel, 16)
+
+make("UIStroke", {
+
+    Color = Color3.fromRGB(62, 62, 70),
+
+    Thickness = 1
+
+}, panel)
+
+local function label(text, x, y, width, height, size, color)
+
+    return make("TextLabel", {
+
+        Position = UDim2.fromOffset(x, y),
+
+        Size = UDim2.fromOffset(width, height),
+
+        BackgroundTransparency = 1,
+
+        Text = text,
+
+        Font = Enum.Font.Gotham,
+
+        TextSize = size,
+
+        TextColor3 = color,
+
+        TextXAlignment = Enum.TextXAlignment.Left,
+
+        TextWrapped = true
+
+    }, panel)
+
+end
+
+local function button(text, x, y, width, height)
+
+    local object = make("TextButton", {
+
+        Position = UDim2.fromOffset(x, y),
+
+        Size = UDim2.fromOffset(width, height),
+
+        BackgroundColor3 = C.field,
+
+        BorderSizePixel = 0,
+
+        Text = text,
+
+        TextColor3 = C.text,
+
+        Font = Enum.Font.GothamBold,
+
+        TextSize = 14
+
+    }, panel)
+
+    round(object, 9)
+
+    return object
+
+end
+
+label("BECZKA HUB", 20, 16, 180, 32, 20, C.text)
+
+label("Łowienie i prezenty", 20, 51, 270, 22, 12, C.muted)
+
+label("Made by beczkawtf", 20, 76, 270, 18, 12, C.green)
+
+local minimize = button("−", 228, 18, 28, 28)
+
+local close = button("X", 262, 18, 28, 28)
+
+local keyBox = make("TextBox", {
+
+    Position = UDim2.fromOffset(20, 108),
+
+    Size = UDim2.fromOffset(270, 38),
+
+    BackgroundColor3 = C.field,
+
+    BorderSizePixel = 0,
+
+    Text = "",
+
+    PlaceholderText = "Wpisz kod dostępu",
+
+    PlaceholderColor3 = C.muted,
+
+    TextColor3 = C.text,
+
+    Font = Enum.Font.Gotham,
+
+    TextSize = 14,
+
+    ClearTextOnFocus = false
+
+}, panel)
+
+round(keyBox, 9)
+
+local unlock = button("Odblokuj", 20, 155, 270, 34)
+
+unlock.TextColor3 = C.green
+
+local fishButton = button("AutoFish: OFF", 20, 202, 270, 43)
+
+local giftButton = button("AutoClaimGift: OFF", 20, 254, 270, 43)
+
+label(
+
+    "Sprawdza „!” i odbiera prezenty Ready!",
+
+    20, 302, 270, 22, 11, C.muted
+
+)
+
+local status = label(
+
+    "Wpisz kod, aby odblokować.",
+
+    20, 328, 270, 36, 12, C.muted
+
+)
+
+label(
+
+    "F6: pokaż / minimalizuj  •  F8: zakończ",
+
+    20, 369, 270, 16, 11, C.muted
+
+)
+
+local restore = make("Frame", {
+
+    Position = panel.Position,
+
+    Size = UDim2.fromOffset(180, 40),
+
+    BackgroundColor3 = C.bg,
+
+    BorderSizePixel = 0,
+
+    Active = true,
+
+    Visible = false
+
+}, gui)
+
+round(restore, 12)
+
+make("UIStroke", {
+
+    Color = C.green,
+
+    Thickness = 1
+
+}, restore)
+
+make("TextLabel", {
+
+    Size = UDim2.fromScale(1, 1),
+
+    BackgroundTransparency = 1,
+
+    Text = "AutoFish + Gifts · F6",
+
+    TextColor3 = C.green,
+
+    Font = Enum.Font.GothamBold,
+
+    TextSize = 12
+
+}, restore)
+
+local function setStatus(text, bad)
+
+    if not S.alive then return end
+
+    status.Text = text
+
+    status.TextColor3 = bad and C.error or C.muted
+
+end
+
+local function toggleWindow()
+
+    if not S.alive then return end
+
+    panel.Visible = not panel.Visible
+
+    restore.Visible = not panel.Visible
+
+end
+
+local function paint(object, enabled, name)
+
+    object.Text = name .. (enabled and ": ON" or ": OFF")
+
+    object.BackgroundColor3 = enabled and C.green or C.field
+
+    object.TextColor3 = enabled and C.bg or C.text
+
+end
+
+local backendOK, VI = pcall(function()
+
+    return UIS:CreateVirtualInput()
+
+end)
+
+if not backendOK then
+
+    VI = nil
+
+end
+
+local function release()
+
+    if not S.held then return true end
+
+    local success, err = pcall(function()
+
+        VI:SendMouseButton(
+
+            S.held,
+
+            Enum.UserInputType.MouseButton1,
+
+            false,
+
+            0
+
+        )
+
+    end)
+
+    if success or string.find(
+
+        tostring(err),
+
+        "duplicate button state",
+
+        1,
+
+        true
+
+    ) then
+
+        S.held = nil
+
+        return true
+
+    end
+
+    return false, err
+
+end
+
+local function allowed()
+
+    if not S.unlocked then
+
+        setStatus("Najpierw wpisz poprawny kod.", true)
+
+        return false
+
+    end
+
+    if not VI then
+
+        setStatus("Brak dostępu do symulowania kliknięć.", true)
+
+        return false
+
+    end
+
+    return true
+
+end
+
+-- Weryfikacja RSA-2048 / PKCS#1 v1.5 / SHA-256.
+-- Tylko klucz publiczny; brak sekretu podpisującego w kliencie.
+local PUBLIC_MODULUS = "d0fa0f7f99f571ca072e875168833be1c5fb68d5014ad2aa2d21ab6dbdc6537e3e0ba0ec73ede6025a1498a8d0aea195b0bc575b8133582fb391a30bd5e17ca7314625ec2abb9cc1f9b0ad3544ea8a6e5accd9bcde1357cff56890aa55d444bef6db5d641764142ed92e8b89120a2c5dbf8855777cc36c7e919248ff4ef1d3218460aa858e57058b2b5fe8d9bcf33bbec6b447f5d04160853c0f599e6edc41da5b5ad6d856fa52ace83a6a53221df4f84ce76f220b506866e5fbd4859b07ffdf5b5ae93c7bb9bafcc520fbcc1deb539450b7b549d545fdfd241fe2193e5e1d4f6056411deb0be8ab493fe4ad9e1e7ade0f3137bc18a5f925d75140e9475e5b1d"
+local B = bit32
+local K = {
+0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2}
+local function word(n)
+    return string.char(B.rshift(n,24),B.band(B.rshift(n,16),255),B.band(B.rshift(n,8),255),B.band(n,255))
+end
+local function sha256(message)
+    local length = #message * 8
+    message = message .. string.char(128)
+    message = message .. string.rep(string.char(0),(56-#message%64)%64)
+        .. word(math.floor(length/4294967296)) .. word(length%4294967296)
+    local H={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}
+    for offset=1,#message,64 do
+        local W={}
+        for i=0,15 do
+            local a,b,c,d=message:byte(offset+i*4,offset+i*4+3)
+            W[i+1]=a*16777216+b*65536+c*256+d
+        end
+        for i=17,64 do
+            local x,y=W[i-15],W[i-2]
+            local s0=B.bxor(B.rrotate(x,7),B.rrotate(x,18),B.rshift(x,3))
+            local s1=B.bxor(B.rrotate(y,17),B.rrotate(y,19),B.rshift(y,10))
+            W[i]=(W[i-16]+s0+W[i-7]+s1)%4294967296
+        end
+        local a,b,c,d,e,f,g,h=table.unpack(H)
+        for i=1,64 do
+            local s1=B.bxor(B.rrotate(e,6),B.rrotate(e,11),B.rrotate(e,25))
+            local ch=B.bxor(B.band(e,f),B.band(B.bnot(e),g))
+            local t1=(h+s1+ch+K[i]+W[i])%4294967296
+            local s0=B.bxor(B.rrotate(a,2),B.rrotate(a,13),B.rrotate(a,22))
+            local maj=B.bxor(B.band(a,b),B.band(a,c),B.band(b,c))
+            local t2=(s0+maj)%4294967296
+            h,g,f,e,d,c,b,a=g,f,e,(d+t1)%4294967296,c,b,a,(t1+t2)%4294967296
+        end
+        local V={a,b,c,d,e,f,g,h}
+        for i=1,8 do H[i]=(H[i]+V[i])%4294967296 end
+    end
+    local output={}
+    for i=1,8 do output[i]=word(H[i]) end
+    return table.concat(output)
+end
+local function unhex(s)
+    if #s%2~=0 or s:find("[^0-9a-fA-F]") then return nil end
+    return (s:gsub("..",function(pair) return string.char(tonumber(pair,16)) end))
+end
+local modulusBytes=unhex(PUBLIC_MODULUS)
+local N=#modulusBytes
+local modulus={}
+for i=1,N do modulus[i]=modulusBytes:byte(N-i+1) end
+local function zero()
+    local a={}
+    for i=1,N do a[i]=0 end
+    return a
+end
+local function compare(a,b)
+    for i=N,1,-1 do
+        if a[i]~=b[i] then return a[i]>b[i] and 1 or -1 end
+    end
+    return 0
+end
+local function addmod(a,b)
+    local result={}
+    local carry=0
+    for i=1,N do
+        local v=a[i]+b[i]+carry
+        result[i]=v%256
+        carry=math.floor(v/256)
+    end
+    if carry>0 or compare(result,modulus)>=0 then
+        local borrow=0
+        for i=1,N do
+            local v=result[i]-modulus[i]-borrow
+            borrow=v<0 and 1 or 0
+            result[i]=v%256
+        end
+    end
+    return result
+end
+local function multiply(a,b)
+    local result=zero()
+    local current=a
+    for i=1,N do
+        local v=b[i]
+        for _=1,8 do
+            if v%2==1 then result=addmod(result,current) end
+            v=math.floor(v/2)
+            current=addmod(current,current)
+        end
+        -- Oddaje czas silnikowi podczas kosztownej weryfikacji.
+        if i%32==0 then task.wait() end
+    end
+    return result
+end
+local function signatureValid(payload,signature)
+    if #signature~=N then return false end
+    local base={}
+    for i=1,N do base[i]=signature:byte(N-i+1) end
+    if compare(base,modulus)>=0 then return false end
+    local result=base
+    for _=1,16 do result=multiply(result,result) end
+    result=multiply(result,base)
+    local bytes={}
+    for i=N,1,-1 do bytes[#bytes+1]=string.char(result[i]) end
+    local digestInfo=unhex("3031300d060960864801650304020105000420")..sha256(payload)
+    local expected=string.char(0,1)..string.rep(string.char(255),N-#digestInfo-3)..string.char(0)..digestInfo
+    return table.concat(bytes)==expected
+end
+local function verifyOfflineLicense(key,username,userId)
+    if not B then return false,"Brak bit32 w środowisku executora." end
+    if #key>1200 then return false,"Nieprawidłowy format klucza." end
+    local payloadHex,signatureHex=key:match("^BECZKA%.([0-9a-fA-F]+)%.([0-9a-fA-F]+)$")
+    if not payloadHex then return false,"Nieprawidłowy format licencji." end
+    local payload,signature=unhex(payloadHex),unhex(signatureHex)
+    if not payload or not signature then return false,"Nieprawidłowy klucz." end
+    local name,id,expires,nonce=payload:match("^v1|([A-Za-z0-9_]+)|([0-9]+)|([0-9]+)|([0-9a-f]+)$")
+    expires=tonumber(expires)
+    if not name or not expires or #nonce~=24 then return false,"Nieprawidłowe dane licencji." end
+    if name:lower()~=username:lower() or id~=tostring(userId) then
+        return false,"Licencja jest przypisana do innego konta."
+    end
+    if expires<=os.time() then return false,"Licencja wygasła. Sprawdź zegar komputera." end
+    if not signatureValid(payload,signature) then return false,"Nieprawidłowy podpis licencji." end
+    if expires<=os.time() then return false,"Licencja wygasła." end
+    return true,expires
+end
+
+
+local licenseExpires = 0
+local licenseChecking = false
+local function expireLicense()
+    S.unlocked = false
+    S.fish = false
+    S.gift = false
+    licenseExpires = 0
+    release()
+    paint(fishButton, false, "AutoFish")
+    paint(giftButton, false, "AutoClaimGift")
+    keyBox.TextEditable = true
+    keyBox.PlaceholderText = "Wpisz nową licencję..."
+    unlock.Text = "Sprawdź licencję"
+    setStatus("Licencja wygasła.", true)
+end
+keyBox.PlaceholderText = "Wklej cały klucz BECZKA..."
+unlock.Text = "Sprawdź licencję"
+setStatus("Wklej licencję otrzymaną od właściciela.")
+connect(unlock.Activated, function()
+    if licenseChecking then return end
+    local key = keyBox.Text:match("^%s*(.-)%s*$")
+    if key == "" then setStatus("Wklej klucz licencji.", true); return end
+    licenseChecking = true
+    setStatus("Sprawdzam podpis. Poczekaj...")
+    local ok, valid, result = pcall(function()
+        return verifyOfflineLicense(key, Players.LocalPlayer.Name, Players.LocalPlayer.UserId)
+    end)
+    licenseChecking = false
+    if not S.alive then return end
+    if not ok then setStatus("Błąd weryfikacji: " .. tostring(valid), true); return end
+    if not valid then setStatus(result, true); return end
+    licenseExpires = result
+    S.unlocked = true
+    keyBox.Text = ""
+    keyBox.TextEditable = false
+    keyBox.PlaceholderText = "Licencja aktywna"
+    unlock.Text = "Licencja aktywna"
+    setStatus("Licencja aktywna dla " .. Players.LocalPlayer.Name)
+end)
+
+connect(fishButton.Activated, function()
+
+    if not allowed() then return end
+
+    S.fish = not S.fish
+
+    paint(fishButton, S.fish, "AutoFish")
+
+    setStatus(
+
+        S.fish and "AutoFish włączone."
+
+        or "AutoFish wyłączone."
+
+    )
+
+end)
+
+local nextGiftCheck = 0
+
+local nextGiftOpen = 0
+
+connect(giftButton.Activated, function()
+
+    if not allowed() then return end
+
+    S.gift = not S.gift
+
+    paint(giftButton, S.gift, "AutoClaimGift")
+
+    if S.gift then
+
+        nextGiftOpen = 0
+
+        nextGiftCheck = 0
+
+    end
+
+    setStatus(
+
+        S.gift and "AutoClaimGift włączone — sprawdzam „!”."
+
+        or "AutoClaimGift wyłączone."
+
+    )
+
+end)
+
+connect(minimize.Activated, toggleWindow)
+
+-- Przeciąganie panelu.
+
+local handle = make("Frame", {
+
+    Size = UDim2.new(1, -90, 0, 48),
+
+    BackgroundTransparency = 1,
+
+    Active = true,
+
+    ZIndex = 10
+
+}, panel)
+
+local dragging = false
+
+local dragInput
+
+local dragStart
+
+local startPosition
+
+local moved = false
+
+local smallDrag = false
+
+local function beginDrag(input, small)
+
+    if dragging then return end
+
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1
+
+        and input.UserInputType ~= Enum.UserInputType.Touch then
+
+        return
+
+    end
+
+    dragging = true
+
+    dragInput = input
+
+    dragStart = input.Position
+
+    startPosition = panel.Position
+
+    moved = false
+
+    smallDrag = small
+
+end
+
+connect(handle.InputBegan, function(input)
+
+    beginDrag(input, false)
+
+end)
+
+connect(restore.InputBegan, function(input)
+
+    beginDrag(input, true)
+
+end)
+
+connect(UIS.InputChanged, function(input)
+
+    if not dragging or not S.alive then return end
+
+    if dragInput.UserInputType == Enum.UserInputType.MouseButton1 then
+
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement then
+
+            return
+
+        end
+
+    elseif input ~= dragInput then
+
+        return
+
+    end
+
+    local delta = input.Position - dragStart
+
+    if delta.Magnitude > 5 then
+
+        moved = true
+
+    end
+
+    if not moved then return end
+
+    local camera = workspace.CurrentCamera
+
+    if not camera then return end
+
+    local viewport = camera.ViewportSize
+
+    local size = smallDrag
+
+        and restore.AbsoluteSize or panel.AbsoluteSize
+
+    local x = math.clamp(
+
+        startPosition.X.Offset + delta.X,
+
+        0,
+
+        math.max(0, viewport.X - size.X)
+
+    )
+
+    local y = math.clamp(
+
+        startPosition.Y.Offset + delta.Y,
+
+        0,
+
+        math.max(0, viewport.Y - size.Y)
+
+    )
+
+    panel.Position = UDim2.fromOffset(x, y)
+
+    restore.Position = panel.Position
+
+end)
+
+connect(UIS.InputEnded, function(input)
+
+    if not dragging or input ~= dragInput then return end
+
+    local reopen = smallDrag and not moved
+
+    dragging = false
+
+    dragInput = nil
+
+    if reopen then
+
+        toggleWindow()
+
+    end
+
+end)
+
+S.stop = function()
+
+    if not S.alive then return end
+
+    S.alive = false
+
+    S.fish = false
+
+    S.gift = false
+
+    release()
+
+    for _, connection in ipairs(connections) do
+
+        connection:Disconnect()
+
+    end
+
+    gui:Destroy()
+
+end
+
+connect(close.Activated, function()
+
+    S.stop()
+
+end)
+
+connect(UIS.InputBegan, function(input)
+
+    if input.KeyCode == Enum.KeyCode.F8 then
+
+        S.stop()
+
+    elseif input.KeyCode == Enum.KeyCode.F6
+
+        and not UIS:GetFocusedTextBox() then
+
+        toggleWindow()
+
+    end
+
+end)
+
+local function visible(object)
+
+    if not object or not object:IsA("GuiObject") then
+
+        return false
+
+    end
+
+    if object:IsDescendantOf(gui) then
+
+        return false
+
+    end
+
+    local current = object
+
+    while current and current ~= PG do
+
+        if current:IsA("GuiObject") and not current.Visible then
+
+            return false
+
+        elseif current:IsA("ScreenGui") and not current.Enabled then
+
+            return false
+
+        end
+
+        current = current.Parent
+
+    end
+
+    return object:IsDescendantOf(PG)
+
+end
+
+local function inside(object, position)
+
+    if not object.Visible then return false end
+
+    local p = object.AbsolutePosition
+
+    local size = object.AbsoluteSize
+
+    return position.X >= p.X
+
+        and position.X <= p.X + size.X
+
+        and position.Y >= p.Y
+
+        and position.Y <= p.Y + size.Y
+
+end
+
+local function click(object)
+
+    if not S.alive or not S.unlocked or licenseChecking or dragging or UIS:GetFocusedTextBox() then
+
+        return false
+
+    end
+
+    if not visible(object) then return false end
+
+    local size = object.AbsoluteSize
+
+    if size.X <= 0 or size.Y <= 0 then return false end
+
+    local position = object.AbsolutePosition + size / 2
+
+    local ancestor = object.Parent
+
+    while ancestor and ancestor ~= PG do
+
+        if ancestor:IsA("GuiObject") and ancestor.ClipsDescendants then
+
+            local p = ancestor.AbsolutePosition
+
+            local s = ancestor.AbsoluteSize
+
+            if position.X < p.X or position.X > p.X + s.X
+
+                or position.Y < p.Y or position.Y > p.Y + s.Y then
+
+                return false
+
+            end
+
+        end
+
+        ancestor = ancestor.Parent
+
+    end
+
+    local screen = object:FindFirstAncestorWhichIsA("ScreenGui")
+
+    if screen and not screen.IgnoreGuiInset then
+
+        position = position + GS:GetGuiInset()
+
+    end
+
+    if inside(panel, position) or inside(restore, position) then
+
+        setStatus("Panel zasłania cel. Przesuń go lub użyj F6.")
+
+        return false
+
+    end
+
+    local released, err = release()
+
+    if not released then error(tostring(err), 0) end
+
+    VI:SendMouseButton(
+
+        position,
+
+        Enum.UserInputType.MouseButton1,
+
+        true,
+
+        0
+
+    )
+
+    S.held = position
+
+    task.wait(0.02)
+
+    local releasedNow, releaseError = release()
+
+    if not releasedNow then
+
+        error(tostring(releaseError), 0)
+
+    end
+
+    return true
+
+end
+
+local function normalized(text)
+
+    return string.lower(text):gsub("[%s_%-!]", "")
+
+end
+
+local function framesContainer()
+
+    local ui = PG:FindFirstChild("UI")
+
+    local base = ui and ui:FindFirstChild("Base")
+
+    return base and base:FindFirstChild("Frames")
+
+end
+
+local function giftWindow()
+
+    local frames = framesContainer()
+
+    if not frames then return nil end
+
+    for _, window in ipairs(frames:GetChildren()) do
+
+        if visible(window) then
+
+            local name = normalized(window.Name)
+
+            if string.find(name, "playtime", 1, true)
+
+                or name == "gifts"
+
+                or name == "freegifts" then
+
+                return window
+
+            end
+
+            for _, object in ipairs(window:GetDescendants()) do
+
+                if object:IsA("TextLabel")
+
+                    and normalized(object.Text) == "playtimerewards" then
+
+                    return window
+
+                end
+
+            end
+
+        end
+
+    end
+
+end
+
+local function readyButton(window)
+
+    for _, object in ipairs(window:GetDescendants()) do
+
+        if (object:IsA("TextLabel") or object:IsA("TextButton"))
+
+            and visible(object)
+
+            and normalized(object.Text) == "ready" then
+
+            local current = object
+
+            while current and current ~= window do
+
+                if current:IsA("GuiButton") and visible(current) then
+
+                    return current
+
+                end
+
+                current = current.Parent
+
+            end
+
+            local parent = object.Parent
+
+            if parent and parent:IsA("GuiObject")
+
+                and parent.AbsoluteSize.X <= 300
+
+                and parent.AbsoluteSize.Y <= 300 then
+
+                local candidate
+
+                local count = 0
+
+                for _, child in ipairs(parent:GetDescendants()) do
+
+                    if child:IsA("GuiButton") and visible(child) then
+
+                        candidate = child
+
+                        count = count + 1
+
+                    end
+
+                end
+
+                if count == 1 then
+
+                    return candidate
+
+                end
+
+            end
+
+        end
+
+    end
+
+end
+
+-- Szukanie czerwonego „!” na przycisku prezentów.
+
+local function giftOpener()
+
+    local frames = framesContainer()
+
+    local named = {}
+
+    local fallback = {}
+
+    local camera = workspace.CurrentCamera
+
+    if not camera then return nil end
+
+    local function hasBadge(object)
+
+        for _, child in ipairs(object:GetDescendants()) do
+
+            if (child:IsA("TextLabel") or child:IsA("TextButton"))
+
+                and visible(child)
+
+                and child.Text:gsub("%s+", "") == "!" then
+
+                return true
+
+            end
+
+        end
+
+        return false
+
+    end
+
+    for _, object in ipairs(PG:GetDescendants()) do
+
+        if object:IsA("GuiButton")
+
+            and visible(object)
+
+            and not (frames and object:IsDescendantOf(frames))
+
+            and hasBadge(object) then
+
+            local size = object.AbsoluteSize
+
+            local position = object.AbsolutePosition
+
+            local viewport = camera.ViewportSize
+
+            if size.X > 0 and size.Y > 0
+
+                and size.X <= 180 and size.Y <= 180 then
+
+                local name = normalized(object:GetFullName())
+
+                if string.find(name, "gift", 1, true)
+
+                    or string.find(name, "playtime", 1, true) then
+
+                    table.insert(named, object)
+
+                elseif position.X < viewport.X * 0.2
+
+                    and position.Y < viewport.Y * 0.75 then
+
+                    table.insert(fallback, object)
+
+                end
+
+            end
+
+        end
+
+    end
+
+    if #named == 1 then
+
+        return named[1]
+
+    end
+
+    if #named == 0 and #fallback == 1 then
+
+        return fallback[1]
+
+    end
+
+end
+
+local function closeGift(window)
+
+    for _, name in ipairs({"Close", "CloseButton", "Exit", "ExitButton"}) do
+
+        local object = window:FindFirstChild(name, true)
+
+        if object and object:IsA("GuiButton") and visible(object) then
+
+            return click(object)
+
+        end
+
+    end
+
+    return false
+
+end
+
+local lastWarning = -math.huge
+
+-- Jedna pętla klikania dla obu funkcji.
+
+while S.alive do
+
+    local delay = 0.1
+
+    if S.unlocked and not licenseChecking and (S.fish or S.gift)
+
+        and not dragging
+
+        and not UIS:GetFocusedTextBox() then
+
+        local success, err = pcall(function()
+
+            local released, releaseError = release()
+
+            if not released then
+
+                error(tostring(releaseError), 0)
+
+            end
+
+            local now = os.clock()
+
+            local window = giftWindow()
+
+            if window then
+
+                -- AutoFish czeka, gdy okno prezentów jest otwarte.
+
+                if S.gift and now >= nextGiftCheck then
+
+                    nextGiftCheck = now + 0.5
+
+                    local target = readyButton(window)
+
+                    if target then
+
+                        if click(target) then
+
+                            setStatus("Kliknięto gotowy prezent.")
+
+                        end
+
+                    elseif S.openedGift then
+
+                        if closeGift(window) then
+
+                            S.openedGift = false
+
+                            nextGiftOpen = now + 5
+
+                            setStatus("Prezenty sprawdzone. Okno zamknięte.")
+
+                        else
+
+                            setStatus("Nie znaleziono zamknięcia. Zamknij okno nagród.")
+
+                        end
+
+                    else
+
+                        setStatus("Brak wykrytych Ready! w tej zakładce.")
+
+                    end
+
+                elseif not S.gift then
+
+                    setStatus("Zamknij okno nagród, aby wznowić AutoFish.")
+
+                end
+
+                return
+
+            end
+
+            S.openedGift = false
+
+            if S.gift and now >= nextGiftOpen then
+
+                nextGiftOpen = now + 2
+
+                local opener = giftOpener()
+
+                if opener then
+
+                    if click(opener) then
+
+                        S.openedGift = true
+
+                        nextGiftCheck = now + 0.5
+
+                        setStatus("Wykryto „!” — otwieram prezenty.")
+
+                        task.wait(0.3)
+
+                        return
+
+                    end
+
+                elseif not S.fish then
+
+                    setStatus("Czekam na wykrycie „!” przy prezentach.")
+
+                end
+
+            end
+
+            if S.fish then
+
+                delay = 0.03
+
+                local fishingGui = PG:FindFirstChild("FishingGui")
+
+                local fishing = fishingGui
+
+                    and fishingGui:FindFirstChild("Fishing")
+
+                local target = fishing
+
+                    and fishing:FindFirstChild("ClickSpeedUpActive", true)
+
+                if visible(target) then
+
+                    if click(target) then
+
+                        setStatus("AutoFish działa.")
+
+                    end
+
+                else
+
+                    setStatus("Czekam na cel łowienia...")
+
+                end
+
+            end
+
+        end)
+
+        if not success and S.alive then
+
+            release()
+
+            setStatus("Kliknięcie zablokowane. Zamknij F9 lub menu.", true)
+
+            delay = 0.2
+
+            if os.clock() - lastWarning >= 10 then
+
+                lastWarning = os.clock()
+
+                warn("[AUTO]", err)
+
+            end
+
+        end
+
+    end
+
+    task.wait(delay)
+
+end
+
+release()
+
+if env.__AutoFishPanel == S then
+
+    env.__AutoFishPanel = nil
+
+end
