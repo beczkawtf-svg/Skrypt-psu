@@ -35,77 +35,6 @@ local S = {
 
 env.__AutoFishPanel = S
 
-local getConnections = env.getconnections or getconnections
--- Test możliwości na prywatnym zdarzeniu, bez wywoływania funkcji gry.
-local function checkCallbackBackend()
-    if type(getConnections) ~= "function" then
-        return false, "Brak getconnections — odbiór w tle niedostępny."
-    end
-    local probe = Instance.new("BindableEvent")
-    local result, reason = false, "Nie udało się sprawdzić dostępu do funkcji."
-    local ok, err = pcall(function()
-        local empty = getConnections(probe.Event)
-        if type(empty) ~= "table" or next(empty) ~= nil then
-            reason = "getconnections zwraca fałszywe połączenia pustego zdarzenia."
-            return
-        end
-        local token, received = {}, nil
-        local connection = probe.Event:Connect(function(value) received = value end)
-        local list = getConnections(probe.Event)
-        if type(list) == "table" then
-            for _, item in pairs(list) do
-                local readable, callback = pcall(function() return item.Function end)
-                if readable and type(callback) == "function" then
-                    pcall(callback, token)
-                    if received == token then result = true;break end
-                end
-            end
-        end
-        connection:Disconnect()
-        reason = result and "Dostęp do funkcji potwierdzony."
-            or "getconnections nie udostępnia prawdziwej funkcji kontrolnego zdarzenia."
-    end)
-    probe:Destroy()
-    if not ok then return false, "Test getconnections zakończył się błędem: " .. tostring(err) end
-    return result, reason
-end
-
-local signalEmitter = env.firesignal or firesignal
-local rewardBackend
-local function checkSignalBackend()
-    if type(signalEmitter) ~= "function" then return false, "Brak firesignal." end
-    local probe = Instance.new("BindableEvent")
-    local token, received = {}, nil
-    local connection = probe.Event:Connect(function(value) received = value end)
-    local ok, err = pcall(signalEmitter, probe.Event, token)
-    if ok then
-        for _ = 1, 4 do
-            if received == token then break end
-            task.wait(0.05)
-        end
-    end
-    connection:Disconnect()
-    probe:Destroy()
-    if not ok then return false, "firesignal: " .. tostring(err) end
-    if received ~= token then return false, "firesignal nie wywołał zdarzenia testowego." end
-    return true, "firesignal przeszedł test zdarzenia."
-end
-local function checkRewardBackend()
-    -- Ominięcie atrapy getconnections przez osobny mechanizm zdarzeń.
-    local signalOK, signalReason = checkSignalBackend()
-    if signalOK then
-        rewardBackend = "signal"
-        return true, signalReason
-    end
-    local callbackOK, callbackReason = checkCallbackBackend()
-    if callbackOK then
-        rewardBackend = "callback"
-        return true, callbackReason
-    end
-    rewardBackend = nil
-    return false, "Brak działającego odbioru w tle. " .. signalReason
-end
-
 local connections = {}
 local activeTweens = {}
 
@@ -337,7 +266,7 @@ local selected = "fish"
 local selectionVersion = 0
 local descriptions = {
     fish = "Automatycznie przyspiesza łowienie. Włącz i skup się na grze — panel zadba o klikanie dostępnego przycisku.",
-    gift = "Odbiera prezenty Playtime i darmowe jajko po zakończeniu timera 45 minut. Działa w tle przez funkcje przycisków gry.",
+    gift = "Otwiera okna nagród i klika gotowe prezenty oraz jajko po 45 minutach. Na czas odbioru wstrzymuje AutoFish. Następnie przywraca okna.",
     incognito = "Pokazuje BECZKASHOOP zamiast Twojego nicku w dostępnych napisach i tabelach. Zmiana tylko na Twoim ekranie; inni gracze widzą prawdziwy nick."
 }
 local optionTitles = {fish = "AutoFish", gift = "AutoGift", incognito = "Incognito"}
@@ -620,9 +549,45 @@ gradient(unlock, C.violet, C.cyan, 10)
 interact(unlock, outline(unlock, C.cyan, 0.65))
 local licenseMessage = textAt(licenseCard, "miłej gry <3", 24, 244, 356, 46, 12, C.muted)
 licenseMessage.TextXAlignment = Enum.TextXAlignment.Center
-local function submitLicense()
+-- Lokalny zapis dzienny, osobny dla nicku i UserId. Klucz zawsze przechodzi RSA.
+local dailyLicense = {}
+do
+    local player = Players.LocalPlayer
+    local account = tostring(player.UserId) .. "_" .. player.Name:lower()
+    local path = "beczkahub_license_" .. account .. ".txt"
+    local read = env.readfile or readfile
+    local write = env.writefile or writefile
+    local memory = env.__BeczkaDailyLicenses
+    if type(memory) ~= "table" then memory = {}; env.__BeczkaDailyLicenses = memory end
+    function dailyLicense.today()
+        return os.date("%Y-%m-%d") -- dzień według zegara lokalnego urządzenia
+    end
+    function dailyLicense.load()
+        local data = memory[account]
+        if type(read) == "function" then
+            local ok, value = pcall(read, path)
+            if ok and type(value) == "string" and #value <= 1600 then data = value end
+        end
+        if type(data) ~= "string" or #data > 1600 then return nil end
+        local day, name, id, key = data:match("^([^\n]+)\n([^\n]+)\n([^\n]+)\n([^\n]+)$")
+        if day ~= dailyLicense.today() or name ~= player.Name:lower()
+            or id ~= tostring(player.UserId) or not key or #key > 1200 then return nil end
+        return key
+    end
+    function dailyLicense.save(key, day)
+        local data = table.concat({day, player.Name:lower(), tostring(player.UserId), key}, "\n")
+        memory[account] = data
+        if type(write) == "function" then
+            local ok = pcall(write, path, data)
+            if ok then return true end
+        end
+        return false
+    end
+end
+local licenseDay
+local function submitLicense(savedKey)
     if not S.alive or S.unlocked or licenseChecking then return end
-    local key = keyBox.Text:match("^%s*(.-)%s*$")
+    local key = (type(savedKey) == "string" and savedKey or keyBox.Text):match("^%s*(.-)%s*$")
     if key == "" then
         licenseMessage.Text = "Wklej cały klucz licencji BECZKA."
         return
@@ -646,21 +611,31 @@ local function submitLicense()
         return
     end
     licenseExpires = result
+    licenseDay = dailyLicense.today()
+    local persisted = dailyLicense.save(key, licenseDay)
     S.unlocked = true
     keyBox.Text = ""
     keyBox:ReleaseFocus()
     unlock.Text = "Licencja aktywna"
     licenseMessage.Text = "miłej gry <3"
     licenseMessage.TextColor3 = C.cyan
-    setStatus("Licencja aktywna dla " .. Players.LocalPlayer.Name)
+    setStatus("Licencja aktywna dla " .. Players.LocalPlayer.Name
+        .. (persisted and " · zapamiętana na dziś." or " · zapis tylko w tej sesji (brak zapisu plików)."))
     animate(licenseView, 0.35, {GroupTransparency = 1})
     task.delay(0.36, function()
         if S.alive and S.unlocked then licenseView.Visible = false end
     end)
 end
-connect(unlock.Activated, submitLicense)
+connect(unlock.Activated, function() submitLicense() end)
 connect(keyBox.FocusLost, function(enterPressed)
     if enterPressed then submitLicense() end
+end)
+
+-- Odczyt niczego nie odblokowuje: również zapisany klucz sprawdzamy kryptograficznie.
+task.defer(function()
+    if not S.alive or S.unlocked or licenseChecking then return end
+    local saved = dailyLicense.load()
+    if saved then submitLicense(saved) end
 end)
 
 local windowVersion = 0
@@ -750,20 +725,12 @@ connect(switch.Activated, function()
         return
     end
     if not S[selected] then
-        if selected == "fish" and not allowed() then return end
-        if selected == "gift" then
-            local supported, reason = checkRewardBackend()
-            if not S.alive then return end
-            if not supported then
-                setStatus("AutoGift niedostępny: " .. reason)
-                warn("[BECZKA HUB] " .. reason)
-                return
-            end
-        end
+        if not allowed() then return end
     end
     S[selected] = not S[selected]
     if selected == "gift" then
         nextGiftCheck = 0
+        if not S.gift and S.cleanupRewards then S.cleanupRewards() end
         if not S.gift and S.giftJob then
             if S.giftJob.thread then pcall(task.cancel, S.giftJob.thread) end
             S.giftJob = nil
@@ -869,6 +836,7 @@ S.stop = function()
     S.alive = false
     S.fish = false
     S.gift = false
+    if S.cleanupRewards then S.cleanupRewards() end
     if S.giftJob and S.giftJob.thread then pcall(task.cancel, S.giftJob.thread) end
     S.giftJob = nil
     release()
@@ -1217,6 +1185,7 @@ end
 -- END INCOGNITO
 
 -- BEGIN BACKGROUND GIFTS
+-- Odbiór przez widoczne przyciski; bez getconnections i firesignal.
 local function child(root, ...)
     for _, name in ipairs({...}) do root = root and root:FindFirstChild(name) end
     return root
@@ -1229,153 +1198,155 @@ local function cleanText(text)
 end
 local function timerSeconds(text)
     text = text:gsub("<[^>]*>", ""):match("^%s*(.-)%s*$")
-    local h, m, s = text:match("^(%d+):(%d%d):(%d%d)$")
-    if h then return tonumber(h)*3600 + tonumber(m)*60 + tonumber(s) end
-    m, s = text:match("^(%d+):(%d%d)$")
-    if m then return tonumber(m)*60 + tonumber(s) end
-end
-local function rewardHandler(button, attempt)
-    local event = attempt == 1 and "MouseButton1Click" or "Activated"
-    if rewardBackend == "signal" then
-        return function(...) return signalEmitter(button[event], ...) end, event
-    end
-    if rewardBackend ~= "callback" then return nil, "Brak sprawdzonego mechanizmu odbioru." end
-    local ok, list = pcall(getConnections, button[event])
-    if not ok or type(list) ~= "table" then return nil, "Brak dostępu do " .. event end
-    local callback
-    for _, connection in ipairs(list) do
-        local readable, fn, enabled = pcall(function() return connection.Function, connection.Enabled end)
-        if readable and enabled ~= false and type(fn) == "function" then
-            if callback and callback ~= fn then return nil, "Niejednoznaczna obsługa " .. event end
-            callback = fn
-        end
-    end
-    return callback, event
-end
-local rewardAttempts = setmetatable({}, {__mode = "k"})
-local function eggWindow(frames, now)
-    return child(frames, "PlaytimeEgg")
-end
-local function eggState(window)
-    local claim = child(window, "Main", "Claim")
-    local timer = child(window, "Main", "PlayTime", "TextLabel")
-    if not claim or not claim:IsA("GuiButton") or not timer or not textObject(timer) then return nil end
-    local seconds = timerSeconds(timer.Text)
-    local ready = seconds == 0 or cleanText(timer.Text) == "ready"
-    -- Zignoruj CantClaim i RobuxBuy; zamknięte okno nie blokuje odczytu timera.
-    return claim, ready and claim.Visible, seconds
+    local h,m,s = text:match("^(%d+):(%d%d):(%d%d)$")
+    if h then return tonumber(h)*3600+tonumber(m)*60+tonumber(s) end
+    m,s = text:match("^(%d+):(%d%d)$")
+    if m then return tonumber(m)*60+tonumber(s) end
 end
 local rewardTrace = {}
+local rewardRetry = setmetatable({}, {__mode="k"})
 local function traceReward(message)
-    table.insert(rewardTrace, message)
-    if #rewardTrace > 18 then table.remove(rewardTrace, 1) end
+    table.insert(rewardTrace,message)
+    if #rewardTrace>24 then table.remove(rewardTrace,1) end
+end
+S.cleanupRewards = function()
+    local job = S.giftJob
+    S.giftJob = nil
+    release()
+    if not job then return end
+    for i=#job.saved,1,-1 do
+        local entry=job.saved[i]
+        if entry.object.Parent then
+            pcall(function() entry.object[entry.property]=entry.value end)
+        end
+    end
+    if job.minimized and S.alive and not windowOpen then toggleWindow() end
 end
 local function stopGift(reason)
-    S.gift = false
-    if S.giftJob and S.giftJob.thread then pcall(task.cancel, S.giftJob.thread) end
-    S.giftJob = nil
+    S.gift=false
+    S.cleanupRewards()
     refreshSelection()
-    setStatus("AutoGift: " .. reason)
-    warn("[BECZKA HUB rewards-v2] " .. reason)
+    setStatus("AutoGift: "..reason)
+    traceReward(reason)
 end
-local function queueReward(button, kind, verify, now)
-    local attempts = rewardAttempts[button] or 0
-    if attempts >= 2 then return false end
-    local attempt = attempts + 1
-    rewardAttempts[button] = attempt
-    local callback, event = rewardHandler(button, attempt)
-    if not callback then traceReward(kind .. ": " .. tostring(event)); return false end
-    traceReward(kind .. ": próba " .. tostring(attempt) .. " / " .. tostring(event))
-    local job = {started = now, verify = verify, button = button, kind = kind}
-    S.giftJob = job
-    setStatus("Próba odbioru: " .. kind .. "…")
-    job.thread = task.spawn(function()
-        local ok, err
-        if event == "Activated" then ok, err = pcall(callback, nil, 1)
-        else ok, err = pcall(callback) end
-        job.error = not ok and tostring(err) or nil
-        job.finished = os.clock()
-        job.done = true
-    end)
+local function saveProperty(job,object,property,value)
+    if object[property]==value then return end
+    table.insert(job.saved,{object=object,property=property,value=object[property]})
+    object[property]=value
+end
+local function queueReward(window,button,kind,verify,now)
+    if now<(rewardRetry[button] or 0) then return false end
+    local job={saved={},window=window,button=button,kind=kind,verify=verify,
+        phase="open",started=now,due=now+0.65,attempts=0,minimized=windowOpen}
+    S.giftJob=job
+    if windowOpen then toggleWindow() end
+    -- Przywracamy wszystkie zmienione właściwości po odbiorze lub anulowaniu.
+    local ancestor=button.Parent
+    while ancestor and ancestor~=PG do
+        if ancestor:IsA("GuiObject") then saveProperty(job,ancestor,"Visible",true)
+        elseif ancestor:IsA("ScreenGui") then saveProperty(job,ancestor,"Enabled",true) end
+        ancestor=ancestor.Parent
+    end
+    traceReward(kind..": otwarto okno")
+    setStatus("AutoGift: otwieram "..kind..". F6: panel, OFF: zatrzymaj.")
     return true
 end
 local function stepGifts(now)
-    if not S.gift or S.starting then return end
-    local job = S.giftJob
+    if not S.gift or not S.unlocked or S.starting then return end
+    local job=S.giftJob
     if job then
-        if job.done then
-            local verified, confirmed = pcall(job.verify)
-            if verified and confirmed then
-                S.giftJob = nil
-                traceReward(job.kind .. ": potwierdzona zmiana stanu")
-                setStatus("Gra zaktualizowała stan nagrody: " .. job.kind .. ".")
-            elseif job.error or now - job.finished >= 3 then
-                traceReward(job.kind .. ": " .. (job.error or "callback zakończony, stan nagrody bez zmian"))
-                S.giftJob = nil
-                if job.error then warn("[BECZKA HUB rewards-v2]", job.kind, job.error) end
+        if not job.button.Parent or not job.window.Parent then
+            S.cleanupRewards();return
+        end
+        if now-job.started>14 then
+            rewardRetry[job.button]=now+60
+            traceReward(job.kind..": limit czasu; ponowienie za minutę")
+            S.cleanupRewards();setStatus("AutoGift: brak potwierdzenia. F7: raport.");return
+        end
+        if now<job.due then return end
+        if job.phase=="verify" then
+            local ok,confirmed=pcall(job.verify)
+            if ok and confirmed then
+                rewardRetry[job.button]=now+5
+                traceReward(job.kind..": potwierdzona zmiana stanu")
+                S.cleanupRewards();setStatus("Odebrano: "..job.kind..".");return
             end
-        elseif now - job.started >= 8 then
-            if job.thread then pcall(task.cancel, job.thread) end
-            S.giftJob = nil
-            rewardAttempts[job.button] = 2
-            traceReward(job.kind .. ": przekroczono 8 sekund")
-            setStatus("AutoGift: funkcja " .. job.kind .. " nie odpowiedziała.")
+            if job.attempts>=2 then
+                rewardRetry[job.button]=now+60
+                traceReward(job.kind..": kliknięto, brak potwierdzenia odbioru")
+                S.cleanupRewards();setStatus("AutoGift: brak potwierdzenia. Ponowię za minutę.");return
+            end
+            job.phase="click"
+        end
+        if job.phase=="open" then
+            -- Przewiń jedynie kontener wybranej nagrody i zapamiętaj pozycję.
+            local ancestor=job.button.Parent
+            while ancestor and ancestor~=job.window.Parent do
+                if ancestor:IsA("ScrollingFrame") then
+                    local delta=job.button.AbsolutePosition-ancestor.AbsolutePosition
+                    local y=math.max(0,ancestor.CanvasPosition.Y+delta.Y-12)
+                    saveProperty(job,ancestor,"CanvasPosition",Vector2.new(ancestor.CanvasPosition.X,y))
+                end
+                ancestor=ancestor.Parent
+            end
+            job.phase="click";job.due=now+0.3;return
+        end
+        if job.phase=="click" then
+            if click(job.button) then
+                job.attempts=job.attempts+1
+                job.phase="verify";job.due=os.clock()+2
+                traceReward(job.kind..": kliknięcie "..job.attempts)
+            end
         end
         return
     end
-    local frames = child(PG, "UI", "Base", "Frames")
-    local window = eggWindow(frames, now)
-    local egg, eggReady, remaining = eggState(window)
-    if egg and remaining and remaining > 0 then rewardAttempts[egg] = nil end
-    if egg and eggReady then
-        if queueReward(egg, "jajko 45 min", function()
-            local _, _, seconds = eggState(window)
-            return seconds ~= nil and seconds > 0
-        end, now) then return end
+    if dragging or UIS:GetFocusedTextBox() or UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
+    local frames=child(PG,"UI","Base","Frames")
+    if not frames then setStatus("AutoGift: czekam na okna gry.");return end
+    -- Nie zasłaniaj sklepu ani innego okna otwartego przez gracza.
+    for _,frame in ipairs(frames:GetChildren()) do
+        if frame:IsA("GuiObject") and frame.Visible
+            and frame.Name~="PlaytimeGifts" and frame.Name~="PlaytimeEgg" then return end
     end
-    local gifts = child(frames, "PlaytimeGifts", "Main", "Gifts")
-    local blocked = false
+    local eggWindow=child(frames,"PlaytimeEgg")
+    local egg=child(eggWindow,"Main","Claim")
+    local timer=child(eggWindow,"Main","PlayTime","TextLabel")
+    if egg and egg:IsA("GuiButton") and timer and textObject(timer) then
+        local ready=cleanText(timer.Text)=="ready" or timerSeconds(timer.Text)==0
+        if ready and egg.Visible then
+            if queueReward(eggWindow,egg,"jajko 45 min",function()
+                local seconds=timer.Parent and timerSeconds(timer.Text)
+                return seconds~=nil and seconds>0
+            end,now) then return end
+        end
+    end
+    local window=child(frames,"PlaytimeGifts")
+    local gifts=child(window,"Main","Gifts")
     if gifts then
-        local list = gifts:GetChildren()
-        table.sort(list, function(a,b) return a.Name < b.Name end)
-        for _, button in ipairs(list) do
-            if button:IsA("GuiButton") and button.Name:match("^Gift%d+$") then
-                local label = button:FindFirstChild("TimeDisplay")
-                if label and textObject(label) then
-                    if cleanText(label.Text) == "ready" then
-                        if queueReward(button, button.Name, function()
-                            return label.Parent ~= nil and cleanText(label.Text) ~= "ready"
-                        end, now) then return end
-                        blocked = true
-                    else
-                        rewardAttempts[button] = nil
-                    end
-                end
+        local buttons=gifts:GetChildren()
+        table.sort(buttons,function(a,b) return a.Name<b.Name end)
+        for _,button in ipairs(buttons) do
+            local label=button:FindFirstChild("TimeDisplay")
+            if button:IsA("GuiButton") and button.Name:match("^Gift%d+$") and button.Visible
+                and label and textObject(label) and cleanText(label.Text)=="ready" then
+                if queueReward(window,button,button.Name,function()
+                    if not label.Parent then return false end
+                    local state=cleanText(label.Text)
+                    return state=="claimed" or state=="collected" or state=="odebrano"
+                        or (timerSeconds(label.Text) or 0)>0
+                end,now) then return end
             end
         end
     end
-    if blocked or egg and eggReady and (rewardAttempts[egg] or 0) >= 2 then
-        setStatus("AutoGift: brak potwierdzenia odbioru. F7: raport nagród.")
-    elseif not gifts then
-        setStatus("AutoGift: czekam na PlaytimeGifts.Main.Gifts.")
-    elseif not window or not egg then
-        setStatus("Prezenty aktywne. Brak rozpoznanego przycisku jajka — F7: raport.")
-    elseif remaining and remaining > 0 then
-        setStatus(string.format("Prezenty aktywne · jajko za %d:%02d", math.floor(remaining/60), remaining%60))
-    elseif remaining == nil and not eggReady then
-        setStatus("Prezenty aktywne. Czekam na timer / Ready jajka.")
-    else
-        setStatus("AutoGift: czekam na dostępne nagrody.")
-    end
+    setStatus("AutoGift: czekam na Ready! prezentów i jajka (45 min).")
 end
 -- END BACKGROUND GIFTS
 
 showRewardsReport = function()
     local old = gui:FindFirstChild("RewardReport")
     if old then old:Destroy();return end
-    local rows = {"BECZKA REWARDS / 5", "PlaceId=" .. tostring(game.PlaceId)}
-    local backendOK, backendReason = checkRewardBackend()
-    table.insert(rows, "Test dostępu: " .. tostring(backendOK) .. " | " .. backendReason .. " | tryb=" .. tostring(rewardBackend))
+    local rows = {"BECZKA REWARDS / 6 — GUI", "PlaceId=" .. tostring(game.PlaceId)}
+    table.insert(rows, "Tryb: widoczne okna + kliknięcia | wejście=" .. tostring(VI ~= nil))
     local frames = child(PG, "UI", "Base", "Frames")
     if frames then
         for _, window in ipairs(frames:GetChildren()) do
@@ -1392,12 +1363,7 @@ showRewardsReport = function()
                         if n <= 65 then
                             local row = o:GetFullName():gsub("Players%.[^.]+%.", "Players.<player>.")
                             if isText then row = row .. " | " .. string.format("%q",o.Text) end
-                            if o:IsA("GuiButton") then
-                                for i, event in ipairs({"Click","Activated"}) do
-                                    local fn = rewardHandler(o,i)
-                                    row = row .. " | " .. event .. "=" .. tostring(type(fn)=="function")
-                                end
-                            end
+                            if o:IsA("GuiButton") then row = row .. " | visible=" .. tostring(visible(o)) end
                             table.insert(rows,row)
                         end
                     end
@@ -1407,46 +1373,6 @@ showRewardsReport = function()
     else table.insert(rows,"Brak UI.Base.Frames") end
     table.insert(rows, "=== OSTATNIE PRÓBY ===")
     for _, line in ipairs(rewardTrace) do table.insert(rows, line) end
-    table.insert(rows, "=== OBSŁUGA KONKRETNYCH PRZYCISKÓW — TYLKO ODCZYT ===")
-    local targets = {
-        child(frames, "PlaytimeGifts", "Main", "Gifts", "Gift1"),
-        child(frames, "PlaytimeEgg", "Main", "Claim")
-    }
-    local debugAPI = env.debug or debug
-    for _, button in pairs(targets) do
-        table.insert(rows, "BUTTON: " .. button.Name)
-        for _, event in ipairs({"MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up", "InputBegan", "InputEnded"}) do
-            local ok, list = pcall(function() return getConnections(button[event]) end)
-            if ok and type(list) == "table" then
-                table.insert(rows, event .. ": " .. tostring(#list) .. " połączeń")
-                for index, connection in ipairs(list) do
-                    if index > 3 then break end
-                    local readable, fn = pcall(function() return connection.Function end)
-                    if readable and type(fn) == "function" and debugAPI then
-                        if type(debugAPI.getinfo) == "function" then
-                            local infoOK, info = pcall(debugAPI.getinfo, fn)
-                            if infoOK and type(info) == "table" then
-                                table.insert(rows, "  źródło=" .. tostring(info.short_src or info.source)
-                                    .. " linia=" .. tostring(info.linedefined) .. " nazwa=" .. tostring(info.name))
-                            end
-                        end
-                        if type(debugAPI.getconstants) == "function" then
-                            local constantsOK, constants = pcall(debugAPI.getconstants, fn)
-                            if constantsOK and type(constants) == "table" then
-                                local values = {}
-                                for _, value in pairs(constants) do
-                                    if type(value) == "string" and #value <= 100 and #values < 16 then
-                                        table.insert(values, string.format("%q", value))
-                                    end
-                                end
-                                table.insert(rows, "  stałe=" .. table.concat(values, ", "))
-                            end
-                        end
-                    end
-                end
-            else table.insert(rows, event .. ": brak dostępu") end
-        end
-    end
     local modal = make("Frame", {Name="RewardReport", AnchorPoint=Vector2.new(0.5,0.5),
         Position=UDim2.fromScale(0.5,0.5), Size=UDim2.fromScale(0.85,0.75),
         BackgroundColor3=C.bg, BorderSizePixel=0, ZIndex=100},gui)
@@ -1465,11 +1391,12 @@ end
 
 
 
-local function expireLicense()
+local function expireLicense(newDay)
     S.unlocked = false
     S.fish = false
     S.gift = false
     licenseExpires = 0
+    if S.cleanupRewards then S.cleanupRewards() end
     if S.giftJob and S.giftJob.thread then pcall(task.cancel, S.giftJob.thread) end
     S.giftJob = nil
     setIncognito(false)
@@ -1478,18 +1405,22 @@ local function expireLicense()
     keyBox.TextEditable = true
     keyBox.PlaceholderText = "Wklej aktualną licencję BECZKA…"
     unlock.Text = "Sprawdź licencję"
-    licenseMessage.Text = "Licencja wygasła. Wklej aktualny klucz."
+    licenseMessage.Text = newDay and "Nowy dzień — wpisz ponownie swoją licencję."
+        or "Licencja wygasła. Wklej aktualny klucz."
     licenseMessage.TextColor3 = Color3.fromRGB(255, 151, 179)
     licenseView.Visible = true
     animate(licenseView, 0.2, {GroupTransparency = 0})
-    setStatus("Licencja wygasła.")
+    setStatus(newDay and "Nowy dzień — potwierdź licencję." or "Licencja wygasła.")
 end
 
 local lastWarning = -math.huge
 
--- AutoGift nie korzysta z kliknięć, nie otwiera ani nie zamyka okien gry.
+-- AutoGift otwiera okna i korzysta z tego samego wejścia myszy co AutoFish.
 while S.alive do
-    if S.unlocked and os.time() >= licenseExpires then expireLicense() end
+    if S.unlocked then
+        if os.time() >= licenseExpires then expireLicense()
+        elseif licenseDay ~= dailyLicense.today() then expireLicense(true) end
+    end
     local now = os.clock()
     if S.held then release() end
     if S.unlocked and S.gift and now >= nextGiftCheck then
@@ -1497,7 +1428,7 @@ while S.alive do
         local success, err = pcall(stepGifts, now)
         if not success then stopGift(tostring(err)) end
     end
-    if S.unlocked and S.fish and not S.starting and not dragging
+    if S.unlocked and S.fish and not S.giftJob and not S.starting and not dragging
         and not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
         and not UIS:GetFocusedTextBox() then
         local success, err = pcall(function()
@@ -1520,10 +1451,4 @@ while S.alive do
         end
     end
     task.wait(S.fish and 0.06 or 0.15)
-end
-
-release()
-
-if env.__AutoFishPanel == S then
-    env.__AutoFishPanel = nil
 end
